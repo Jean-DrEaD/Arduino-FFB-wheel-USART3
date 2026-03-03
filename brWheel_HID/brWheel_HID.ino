@@ -310,13 +310,8 @@ void loop() {
     // 1) feedback STM32
     stmEncPoll();
 
-    // 2) posição
-    int32_t enc = gHaveEnc ? gLastEncPos : 0;
-
-    int32_t wrapped = (CPR != 0) ? (enc % CPR) : 0;
-    if (wrapped < 0) wrapped += CPR;
-
-    turn.x = wrapped - ROTATION_MID;
+  // 2) posição — encPos do STM32 já é cumulativo
+    turn.x = gHaveEnc ? gLastEncPos : 0;
     axis.x = turn.x;
 
     // 3) torque
