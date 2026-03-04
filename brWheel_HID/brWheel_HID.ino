@@ -6,12 +6,13 @@
    - Torque via Serial1 formato SerialCommand: start=0xABCD, steer, speed, checksum
    - Feedback via Serial1 formato SerialFeedback: 18 bytes (ver StmFrames.h)
    - Motor único DD: steer=0, speed=torque
-   - Encoder de posição: MT6701 via ABZ direto no STM32 (não retorna posição no feedback)
-     → Posição deve ser lida por encoder ABZ externo no Arduino OU integrada da velocidade
+   - Posição encoder: STM32 envia get_x_TotalCount() (ticks acumulados) em speedL_meas.
+     Mapeamento 1:1 tick→unidade. Com MT6701 1024PPR (CPR=4096) e ±540°: ±6144 ticks máx.
+     Negação aplicada em gEncPos_f para compensar INVERT_R_DIRECTION no STM32.
 */
 
 // ========================= CONFIG RÁPIDA =========================
-#define USE_FIXED_TORQUE_TEST   1     // 1 = ignora FFB, manda torque fixo para teste
+#define USE_FIXED_TORQUE_TEST   0     // 0 = FFB real do jogo (1 = torque fixo para teste)
 #define FIXED_TORQUE_VALUE      400   // -1000..1000 (comece com 400, suba depois)
 
 #define PRINT_DEBUG_EVERY_MS    500   // debug no Serial (2x por segundo)
@@ -134,6 +135,7 @@ static void stmEncPoll() {
   if (gHaveEnc && (millis() - gLastEncRxMs) > ENC_LINK_TIMEOUT_MS) {
     gHaveEnc  = false;
     gSpeedR   = 0;
+    gEncPos_f = 0.0f;  // centra o volante: evita que spring/stop mantenha torque com posição congelada
   }
 }
 
