@@ -125,7 +125,7 @@ static void stmEncPoll() {
       //   → FFB calculava forças com ângulo errado (efeito spring/stop deslocado)
       //
       // Correto: ticks encoder = unidades de posição, mapeamento 1:1
-      gEncPos_f = (float)f.speedL_meas;
+      gEncPos_f = -(float)f.speedL_meas;   // inverted: positive torque → positive position
       gEncPos_f = constrain(gEncPos_f, (float)-ROTATION_MAX, (float)ROTATION_MAX);
     }
   }
