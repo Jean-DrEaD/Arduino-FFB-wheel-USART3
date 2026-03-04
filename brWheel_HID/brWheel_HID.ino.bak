@@ -361,3 +361,59 @@ void loop() {
   }
 }
 /* Arduino Leonardo/Pro Micro Force Feedback Wheel firmware
+   PC/HID -> Pro Micro -> Serial1 -> STM32 (hoverboard-firmware-hack-FOC)
+   STM32 -> Serial1 -> Pro Micro (feedback velocidade)
+
+   NOTAS:
+   - Torque via Serial1 formato SerialCommand: start=0xABCD, steer, speed, checksum
+   - Feedback via Serial1 formato SerialFeedback: 18 bytes (ver StmFrames.h)
+   - Motor único DD: steer=0, speed=torque
+   - Encoder de posição: MT6701 via ABZ direto no STM32 (não retorna posição no feedback)
+     → Posição deve ser lida por encoder ABZ externo no Arduino OU integrada da velocidade
+*/
+
+// ========================= CONFIG RÁPIDA =========================
+#define USE_FIXED_TORQUE_TEST   1     // 1 = ignora FFB, manda torque fixo para teste
+#define FIXED_TORQUE_VALUE      400   // -1000..1000 (comece com 400, suba depois)
+
+#define PRINT_DEBUG_EVERY_MS    500   // debug no Serial (2x por segundo)
+#define ENC_LINK_TIMEOUT_MS     200   // timeout do link STM32
+// =================================================================
+
+#include <Arduino.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "StmFrames.h"
+#include "Config.h"
+#include "ConfigHID.h"
+#include "debug.h"
+#include "ffb_pro.h"
+#include "USBDesc.h"
+
+#ifdef USE_QUADRATURE_ENCODER
+#include "QuadEncoder.h"
+#endif
+#ifdef USE_VNH5019
+#include "DualVNH5019MotorShield.h"
+#endif
+#include <Wire.h>
+#ifdef USE_EEPROM
+#include <EEPROM.h>
+#endif
+#ifdef USE_LOAD_CELL
+#include <HX711_ADC.h>
+#endif
+#ifdef USE_LCD
+#include <LiquidCrystal_I2C.h>
+#endif
+#ifdef USE_ADS1015
+#include <Adafruit_ADS1015.h>
+#endif
+#ifdef USE_MCP4725
+#include <Adafruit_MCP4725.h>
+#endif
+#ifdef USE_AS5600
+#include "AS5600.h"
+#endif
+
