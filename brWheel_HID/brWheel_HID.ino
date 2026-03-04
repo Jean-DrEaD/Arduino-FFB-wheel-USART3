@@ -112,8 +112,20 @@ static void stmEncPoll() {
       gLastEncRxMs = millis();
 
       // Posicao real do encoder (MT6701 via STM32, campo speedL_meas)
-      // Range: -32768..32767 mapeado para -ROTATION_MAX..ROTATION_MAX
-      gEncPos_f = (float)f.speedL_meas / 32767.0f * (float)ROTATION_MAX;
+      // O firmware envia get_x_TotalCount() clamped para int16 (-32768..32767).
+      // get_x_TotalCount() retorna contagem acumulada em ticks de encoder.
+      // Com MT6701 1024 PPR (CPR=4096) e ROTATION_DEG=1080:
+      //   ROTATION_MAX = CPR/360 * ROTATION_DEG = 4096/360 * 1080 = 12288 ticks
+      // Portanto 1 tick de encoder = 1 unidade de posição do Arduino.
+      //
+      // BUG FIX 4: equação anterior estava ERRADA:
+      //   gEncPos_f = speedL_meas / 32767.0f * ROTATION_MAX
+      //   → comprimia a posição em ~37% (12288/32767 ≈ 0.375)
+      //   → ex: volante a 540° (6144 ticks) reportava ~2304 em vez de 6144
+      //   → FFB calculava forças com ângulo errado (efeito spring/stop deslocado)
+      //
+      // Correto: ticks encoder = unidades de posição, mapeamento 1:1
+      gEncPos_f = (float)f.speedL_meas;
       gEncPos_f = constrain(gEncPos_f, (float)-ROTATION_MAX, (float)ROTATION_MAX);
     }
   }
