@@ -111,6 +111,9 @@ static void stmEncPoll() {
       gCmd2       = f.cmd2;
       gBatVoltage = f.batVoltage;
       gBoardTemp  = f.boardTemp;
+      // Auto-centro no primeiro frame: salva posição atual do STM32 como offset.
+      // Sem isso, o volante começa deslocado (ex: speedL_meas=3997 com gPosOffset=0).
+      if (!gHaveEnc) { gPosOffset = (float)f.speedL_meas; }
       gHaveEnc    = true;
       gLastEncRxMs = millis();
 
@@ -261,6 +264,10 @@ void setup() {
   // A proteção real é o keepalive no loop: mesmo sem Wheel Control, o Arduino
   // continua enviando stmSendCmd(0,0) a cada 2ms → STM32 nunca faz timeout.
   CONFIG_SERIAL.begin(115200);
+  // FIX: reduz timeout do parseInt() de 1000ms para 10ms.
+  // Sem isso, bytes lixo ao fechar o Wheel Control disparam parseInt() que bloqueia
+  // por 1s → HID reports param → Windows remove o dispositivo HID.
+  CONFIG_SERIAL.setTimeout(10);
 
   // Serial1: link STM32 (RX1/TX1 do Pro Micro / Leonardo)
   Serial1.begin(500000);
@@ -343,7 +350,10 @@ void loop() {
     // Na próxima leitura stmEncPoll subtrai gPosOffset → gEncPos_f=0.
     if (gResetPosition) {
       gResetPosition = false;
-      gPosOffset += (float)gEncPos_f + gPosOffset; // novo offset = speedL_meas atual
+      // Fórmula corrigida: new_gPosOffset = gPosOffset + gEncPos_f = speedL_meas atual.
+      // Prova: gEncPos_f = speedL_meas - gPosOffset → novo centro: speedL_meas - novo_gPosOffset = 0
+      //        → novo_gPosOffset = speedL_meas = gPosOffset + gEncPos_f
+      gPosOffset += (float)gEncPos_f; // correto: acumula offset = speedL_meas corrente
       gEncPos_f   = 0.0f;
       gTorqueOut  = 0;
       stmSendCmd(0, 0);
