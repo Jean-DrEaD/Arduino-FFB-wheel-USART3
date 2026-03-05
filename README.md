@@ -1,6 +1,6 @@
 # hoverboard-firmware-hack-FOC — ONE_AXIS_USART_VARIANT (DD FFB Wheel)
 
-Fork do [SiMachines/hoverboard-firmware-hack-FOC](https://github.com/simachines/hoverboard-firmware-hack-FOC) adapatado para encoder magnético MT6701 e comunicação Serial.
+Fork do [SiMachines/hoverboard-firmware-hack-FOC](https://github.com/simachines/hoverboard-firmware-hack-FOC) adaptado para encoder magnético MT6701 e comunicação Serial.
 
 ---
 
