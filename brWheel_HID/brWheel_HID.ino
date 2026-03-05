@@ -59,6 +59,10 @@
 // =================================================================
 // STM32 Link — Feedback (RX)
 // =================================================================
+// Delay para auto-centro: aguarda STM32 completar alinhamento FOC (~3-5s).
+// Capturar speedL_meas durante alinhamento daria offset errado.
+#define AUTO_CENTER_DELAY_MS  4500
+
 static bool     gHaveEnc     = false;
 static int16_t  gSpeedR      = 0;   // velocidade motor (rpm*10 aprox)
 static int16_t  gCmd1        = 0;
@@ -111,9 +115,18 @@ static void stmEncPoll() {
       gCmd2       = f.cmd2;
       gBatVoltage = f.batVoltage;
       gBoardTemp  = f.boardTemp;
-      // Auto-centro no primeiro frame: salva posição atual do STM32 como offset.
-      // Sem isso, o volante começa deslocado (ex: speedL_meas=3997 com gPosOffset=0).
-      if (!gHaveEnc) { gPosOffset = (float)f.speedL_meas; }
+      // FIX [2/4]: auto-centro no primeiro frame ESTÁVEL.
+      // O STM32 leva ~3-5s para alinhar o encoder. Durante esse período,
+      // speedL_meas é instável (rotor sendo movido pelo FOC). Capturar esse
+      // valor como offset resulta em centro errado por toda a sessão.
+      // FIX: aguardar AUTO_CENTER_DELAY_MS antes de armar o auto-centro.
+      // Após o delay, captura o primeiro frame como offset (apenas uma vez por boot).
+      // Re-centralização manual: botão Center no Wheel Control.
+      static bool gAutoCenterArmed = true;  // dispara apenas 1x por boot
+      if (!gHaveEnc && gAutoCenterArmed && millis() > AUTO_CENTER_DELAY_MS) {
+        gPosOffset = (float)f.speedL_meas;
+        gAutoCenterArmed = false;
+      }
       gHaveEnc    = true;
       gLastEncRxMs = millis();
 
@@ -264,9 +277,10 @@ void setup() {
   // A proteção real é o keepalive no loop: mesmo sem Wheel Control, o Arduino
   // continua enviando stmSendCmd(0,0) a cada 2ms → STM32 nunca faz timeout.
   CONFIG_SERIAL.begin(115200);
-  // FIX: reduz timeout do parseInt() de 1000ms para 10ms.
-  // Sem isso, bytes lixo ao fechar o Wheel Control disparam parseInt() que bloqueia
-  // por 1s → HID reports param → Windows remove o dispositivo HID.
+  // FIX [1/4]: parseInt() tem timeout padrão de 1000ms por chamada.
+  // Bytes lixo no COM port ao fechar o Wheel Control disparam parseInt()
+  // que bloqueia o loop() por até 1s → STM32 timeout → meio bip + tela branca.
+  // setTimeout(10) reduz o bloqueio para 10ms, imperceptível.
   CONFIG_SERIAL.setTimeout(10);
 
   // Serial1: link STM32 (RX1/TX1 do Pro Micro / Leonardo)
@@ -350,10 +364,10 @@ void loop() {
     // Na próxima leitura stmEncPoll subtrai gPosOffset → gEncPos_f=0.
     if (gResetPosition) {
       gResetPosition = false;
-      // Fórmula corrigida: new_gPosOffset = gPosOffset + gEncPos_f = speedL_meas atual.
-      // Prova: gEncPos_f = speedL_meas - gPosOffset → novo centro: speedL_meas - novo_gPosOffset = 0
-      //        → novo_gPosOffset = speedL_meas = gPosOffset + gEncPos_f
-      gPosOffset += (float)gEncPos_f; // correto: acumula offset = speedL_meas corrente
+      // FIX [3/4]: fórmula corrigida.
+      // ERRADO: gPosOffset += gEncPos_f + gPosOffset  →  2*offset + pos
+      // CERTO:  gPosOffset += gEncPos_f               →  offset + pos = speedL_meas
+      gPosOffset += (float)gEncPos_f;
       gEncPos_f   = 0.0f;
       gTorqueOut  = 0;
       stmSendCmd(0, 0);
@@ -388,7 +402,11 @@ void loop() {
     //    Mapeia posição do encoder para range HID (-32767..32767)
     int32_t hidPos = 0;
     if (ROTATION_MAX > 0) {
-      hidPos = -(int32_t)((float)turn.x / (float)ROTATION_MAX * (float)MID_REPORT_X);
+      // FIX [4/4]: sem negação no eixo HID.
+      // Com negação: hidPos positivo = virar esquerda → WC desenha volante invertido.
+      // Sem negação: hidPos positivo = virar direita → WC e jogos corretos.
+      // Física do motor OK: stmSendCmd(0, -gTorqueOut) já inverte o sentido.
+      hidPos = (int32_t)((float)turn.x / (float)ROTATION_MAX * (float)MID_REPORT_X);
     }
     hidPos = constrain(hidPos, -MID_REPORT_X - 1, MID_REPORT_X);
 
