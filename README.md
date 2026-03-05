@@ -36,7 +36,7 @@ Fork do [SiMachines/hoverboard-firmware-hack-FOC](https://github.com/simachines/
 
 > **Divisor de tensão TX Arduino → RX STM32:** o Pro Micro opera a 5 V e o STM32 aceita 3,3 V. Use R1 = 1 kΩ em série com o TX e R2 = 2 kΩ entre o fio e GND, conforme diagrama.
 
-> **Capacitores:** remover os capacitores indicados no diagrama para que o encoder ABZ e o PWM funcionem corretamente.
+> **Capacitores:** remover os capacitores indicados no diagrama para que o encoder ABZ e funcione corretamente.
 
 ---
 
