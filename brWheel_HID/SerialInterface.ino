@@ -199,7 +199,9 @@ void configCDC() { // milos, virtual serial port firmware configuration interfac
         myEnc.Write(ROTATION_MID); // milos, just set to zero angle
 #endif // end of quad enc
 #endif // end of use as5600
-        CONFIG_SERIAL.println(0);
+        // DD Serial encoder: set position offset in main loop
+        { extern volatile bool gResetPosition; gResetPosition = true; }
+        CONFIG_SERIAL.println(1);  // 1 = suportado: habilita botão Center no Wheel Control
 #endif // end of use z index
         break;
       case 'Z': // milos, hard reset the z-index offset

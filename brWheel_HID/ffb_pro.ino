@@ -376,8 +376,8 @@ s32v cFFB::CalcTorqueCommands (s32v *pos) { // milos, pointer struct agument, re
           }
 
           switch (ef.type) {
-            case USB_EFFECT_CONSTANT:
-              command.x -= ConstrainEffect(ScaleMagnitude(ApplyEnvelope(ef.magnitude, effectTime[id - 1], ef.attackLevel, ef.fadeLevel, ef.attackTime, ef.fadeTime, ef.duration, ef.startDelay) //milos, added
+            case USB_EFFECT_CONSTANT: // DD Serial: += (sem inversão de sinal na saída)
+              command.x += ConstrainEffect(ScaleMagnitude(ApplyEnvelope(ef.magnitude, effectTime[id - 1], ef.attackLevel, ef.fadeLevel, ef.attackTime, ef.fadeTime, ef.duration, ef.startDelay) //milos, added
                                            , ef.gain, EffectDivider())) * configConstantGain / 100; //milos, added
               if (bitRead(ef.enableAxis, 2)) { // milos, if direction is enabled (bit2 of enableAxis byte)
 #ifdef USE_TWOFFBAXIS
@@ -387,8 +387,8 @@ s32v cFFB::CalcTorqueCommands (s32v *pos) { // milos, pointer struct agument, re
               }
               //LogTextLf("_pro constant");
               break;
-            case USB_EFFECT_RAMP:
-              command.x -= ConstrainEffect(ScaleMagnitude(ApplyEnvelope(RampEffect(ef.rampStart, ef.rampEnd, ef.duration, effectTime[id - 1]), effectTime[id - 1], ef.attackLevel, ef.fadeLevel, ef.attackTime, ef.fadeTime, ef.duration, ef.startDelay) //milos, added
+            case USB_EFFECT_RAMP: // DD Serial: += (idem constant force)
+              command.x += ConstrainEffect(ScaleMagnitude(ApplyEnvelope(RampEffect(ef.rampStart, ef.rampEnd, ef.duration, effectTime[id - 1]), effectTime[id - 1], ef.attackLevel, ef.fadeLevel, ef.attackTime, ef.fadeTime, ef.duration, ef.startDelay) //milos, added
                                            , ef.gain, EffectDivider())); //milos, added
               //LogTextLf("_pro ramp");
               break;
@@ -586,6 +586,9 @@ void BRFFB::calibrate() { // milos, we are only calibrating encoder on x-axis (e
     } else {
       rightGap = actual;
     }
+    // Keepalive: envia frame zero ao STM32 durante a calibração para evitar timeout
+    // (calibrate() usa delay() que bloqueia o loop principal por até 76s).
+    extern void stmSendCmdKeepalive(); stmSendCmdKeepalive();
     delay(300);
   }
   //ROTATION_MAX = rightGap; // milos, commented

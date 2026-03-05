@@ -68,7 +68,9 @@ static int16_t  gBoardTemp   = 0;
 static uint32_t gLastEncRxMs = 0;
 
 // Posição integrada da velocidade (substituto até ter encoder no Arduino)
-static float    gEncPos_f    = 0.0f;
+static float    gEncPos_f  = 0.0f;
+static float    gPosOffset = 0.0f;  // offset de centro: subtraído de cada leitura STM32
+volatile bool   gResetPosition = false; // setado pelo comando C do Wheel Control
 
 static uint16_t stmFbChecksum(const StmEncFrame &f) {
   return (uint16_t)(
@@ -126,7 +128,7 @@ static void stmEncPoll() {
       //   → FFB calculava forças com ângulo errado (efeito spring/stop deslocado)
       //
       // Correto: ticks encoder = unidades de posição, mapeamento 1:1
-      gEncPos_f = -(float)f.speedL_meas;   // inverted: positive torque → positive position
+      gEncPos_f = (float)f.speedL_meas - gPosOffset; // direita=positivo; subtrai offset de centro
       gEncPos_f = constrain(gEncPos_f, (float)-ROTATION_MAX, (float)ROTATION_MAX);
     }
   }
@@ -159,8 +161,16 @@ static void stmSendCmd(int16_t steer, int16_t speed) {
 // Segurança / filtros de torque
 // =================================================================
 static const int16_t TORQUE_DEADBAND = 5;    // ignora ruído < 5 unidades
-static const int16_t TORQUE_MAX      = 600;  // limite absoluto (aumentar gradual: 400→600→800)
-static const int16_t TORQUE_SLEW     = 80;   // máx variação por ciclo (500Hz → rampa ~25ms)
+// TORQUE_MAX: pico de torque enviado ao STM32 (escala -1000..+1000).
+//   600 era conservador demais — impactos saíam em ~30% da força real.
+//   950 deixa headroom de 5% contra clipping e permite picos de meio-fio completos.
+//   Para motores mais fortes ou usuários experientes: 1000 (máximo).
+static const int16_t TORQUE_MAX      = 950;
+// TORQUE_SLEW: variação máxima por ciclo a 500Hz (2ms/ciclo).
+//   80 → 0→950 em ~19 ciclos = 38ms — matava completamente impactos de <30ms.
+//   250 → 0→950 em ~4 ciclos = 8ms — transientes de meio-fio chegam com força real.
+//   Se sentir oscilação/buzz em alta frequência, reduzir para 180.
+static const int16_t TORQUE_SLEW     = 250;
 
 static int16_t gTorqueOut = 0;
 
@@ -239,7 +249,17 @@ AS5600L as5600x(0x36);
 #endif
 
 // =================================================================
+// Keepalive público: chamado durante calibrate() para evitar timeout no STM32.
+// Envia frame zero (torque=0, steer=0) via Serial1 mantendo o link ativo.
+void stmSendCmdKeepalive() { stmSendCmd(0, 0); }
+
 void setup() {
+  // Desabilita reset por DTR: quando o Wheel Control fecha, o Windows derruba o DTR
+  // da porta CDC. No Leonardo/Pro Micro, DTR caindo causa reset do MCU, interrompendo
+  // o Serial1 por ~5s (boot + alinhamento) e fazendo o STM32 entrar em timeout.
+  // UDCON &= ~(1<<DETACH); não é necessário aqui — o boot já passou.
+  // A proteção real é o keepalive no loop: mesmo sem Wheel Control, o Arduino
+  // continua enviando stmSendCmd(0,0) a cada 2ms → STM32 nunca faz timeout.
   CONFIG_SERIAL.begin(115200);
 
   // Serial1: link STM32 (RX1/TX1 do Pro Micro / Leonardo)
@@ -290,6 +310,11 @@ void setup() {
   InitInputs();
   FfbSetDriver(0);
 
+  // CRÍTICO — Serial DD: sem isso EffectDivider()=INF → todos os efeitos = 0.
+  TOP                 = 1000;
+  MM_MAX_MOTOR_TORQUE = 1000;
+  MM_MIN_MOTOR_TORQUE = 0;
+
   ffbs.x     = 0;
   gTorqueOut = 0;
   gEncPos_f  = 0.0f;
@@ -314,6 +339,16 @@ void loop() {
     // 2) Posição do volante
     //    - Se tiver encoder real no Arduino: substitua gEncPos_f pela leitura do encoder
     //    - Por ora usa integração da velocidade (deriva ao longo do tempo)
+    // Botão Center do Wheel Control: salva posição atual como offset.
+    // Na próxima leitura stmEncPoll subtrai gPosOffset → gEncPos_f=0.
+    if (gResetPosition) {
+      gResetPosition = false;
+      gPosOffset += (float)gEncPos_f + gPosOffset; // novo offset = speedL_meas atual
+      gEncPos_f   = 0.0f;
+      gTorqueOut  = 0;
+      stmSendCmd(0, 0);
+    }
+
     turn.x = (int32_t)gEncPos_f;
     axis.x = turn.x;
 
@@ -334,13 +369,16 @@ void loop() {
     gTorqueOut = t16;
 
     // 5) Envia comando ao STM32 (steer=0, speed=torque para motor DD único)
-    stmSendCmd(0, gTorqueOut);
+    // Envia torque ao STM32 SEMPRE (mesmo com Wheel Control fechado).
+    // Isso mantém o keepalive serial ativo e impede timeout no STM32.
+    // Sem FFB ativo (jogo fechado/sem efeitos), gTorqueOut=0 → motor livre.
+    stmSendCmd(0, -gTorqueOut); // neg: INVERT_R_DIRECTION no STM32 re-inverte
 
     // 6) HID report
     //    Mapeia posição do encoder para range HID (-32767..32767)
     int32_t hidPos = 0;
     if (ROTATION_MAX > 0) {
-      hidPos = (int32_t)((float)turn.x / (float)ROTATION_MAX * (float)MID_REPORT_X);
+      hidPos = -(int32_t)((float)turn.x / (float)ROTATION_MAX * (float)MID_REPORT_X);
     }
     hidPos = constrain(hidPos, -MID_REPORT_X - 1, MID_REPORT_X);
 
