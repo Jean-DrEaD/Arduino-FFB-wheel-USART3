@@ -111,8 +111,17 @@ static void stmEncPoll() {
       gCmd2       = f.cmd2;
       gBatVoltage = f.batVoltage;
       gBoardTemp  = f.boardTemp;
-      gHaveEnc    = true;
       gLastEncRxMs = millis();
+
+      // Auto-center: na primeira vez que o link é estabelecido (placa ligou e alinhou),
+      // zera o offset para que a posição do motor pós-alinhamento seja o centro (0°).
+      // Sem isso, o volante aparece em ~-176° no WC porque o encoder para num valor
+      // arbitrário após o alinhamento.
+      if (!gHaveEnc) {
+        gPosOffset = (float)f.speedL_meas;
+        gEncPos_f  = 0.0f;
+      }
+      gHaveEnc    = true;
 
       // Posicao real do encoder (MT6701 via STM32, campo speedL_meas)
       // O firmware envia get_x_TotalCount() clamped para int16 (-32768..32767).
@@ -343,7 +352,7 @@ void loop() {
     // Na próxima leitura stmEncPoll subtrai gPosOffset → gEncPos_f=0.
     if (gResetPosition) {
       gResetPosition = false;
-      gPosOffset += (float)gEncPos_f + gPosOffset; // novo offset = speedL_meas atual
+      gPosOffset = (float)((int16_t)(gEncPos_f + gPosOffset)); // salva speedL_meas atual como novo centro
       gEncPos_f   = 0.0f;
       gTorqueOut  = 0;
       stmSendCmd(0, 0);
