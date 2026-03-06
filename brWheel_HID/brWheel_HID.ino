@@ -60,9 +60,19 @@
 // STM32 Link — Feedback (RX)
 // =================================================================
 static bool     gHaveEnc      = false;
-static bool     gAutoCenterDone = false;
-static int16_t  gLastSpeedL     = 0;
-#define AUTO_CENTER_MS 5000
+
+// Auto-center após alinhamento: aguarda posição estável antes de centrar.
+// Não usa millis() absoluto — isso causaria centrar durante press do botão power
+// (motor parado com enable=0 → posição estável → auto-center disparava cedo demais).
+// Em vez disso: monitora variação de posição; só centra após 4200ms SEM mudança >8 ticks
+// E ignora pos=0 (é o reset interno do contador durante o alinhamento).
+#define AUTO_CENTER_SETTLE_MS   4200  // ms de posição estável → alinhamento terminou
+#define AUTO_CENTER_DEADBAND    8     // ticks de variação tolerada (ruído do encoder)
+#define AUTO_CENTER_RESET_MS    3000  // link precisa ficar down >3s para permitir novo auto-center
+static int16_t  gAutoCenter_lastPos  = 0;
+static uint32_t gAutoCenter_stableMs = 0;
+static bool     gAutoCenter_done     = false;
+static uint32_t gLinkDownMs          = 0;
 static int16_t  gSpeedR      = 0;   // velocidade motor (rpm*10 aprox)
 static int16_t  gCmd1        = 0;
 static int16_t  gCmd2        = 0;
@@ -114,9 +124,30 @@ static void stmEncPoll() {
       gCmd2       = f.cmd2;
       gBatVoltage = f.batVoltage;
       gBoardTemp  = f.boardTemp;
-      gLastSpeedL  = f.speedL_meas;
-      gHaveEnc    = true;
       gLastEncRxMs = millis();
+
+      if (!gHaveEnc) {
+        // Placa acabou de (re)conectar: reinicia detecção de posição estável.
+        gAutoCenter_lastPos  = f.speedL_meas;
+        gAutoCenter_stableMs = millis();
+        gAutoCenter_done     = false;
+      }
+      gHaveEnc = true;
+
+      // Auto-center: aguarda posição estável por AUTO_CENTER_SETTLE_MS.
+      // Garante que o alinhamento terminou antes de centrar.
+      // Ignora pos=0 (reset interno do contador durante alinhamento).
+      if (!gAutoCenter_done) {
+        if (f.speedL_meas == 0 ||
+            abs((int32_t)f.speedL_meas - (int32_t)gAutoCenter_lastPos) > AUTO_CENTER_DEADBAND) {
+          gAutoCenter_lastPos  = f.speedL_meas;
+          gAutoCenter_stableMs = millis();
+        } else if ((millis() - gAutoCenter_stableMs) >= AUTO_CENTER_SETTLE_MS) {
+          gPosOffset       = (float)f.speedL_meas;
+          gEncPos_f        = 0.0f;
+          gAutoCenter_done = true;
+        }
+      }
 
       // Posicao real do encoder (MT6701 via STM32, campo speedL_meas)
       // O firmware envia get_x_TotalCount() clamped para int16 (-32768..32767).
@@ -139,9 +170,16 @@ static void stmEncPoll() {
 
   // Timeout de link
   if (gHaveEnc && (millis() - gLastEncRxMs) > ENC_LINK_TIMEOUT_MS) {
-    gHaveEnc  = false;
-    gSpeedR   = 0;
-    gEncPos_f = 0.0f;  // centra o volante: evita que spring/stop mantenha torque com posição congelada
+    gHaveEnc    = false;
+    gSpeedR     = 0;
+    gEncPos_f   = 0.0f;  // centra o volante: evita que spring/stop mantenha torque com posição congelada
+    gLinkDownMs = millis();
+  }
+  // Só permite novo auto-center se o link ficou down >AUTO_CENTER_RESET_MS
+  // (distingue desligamento real da placa de press do botão power)
+  if (!gHaveEnc && gAutoCenter_done &&
+      (millis() - gLinkDownMs) > AUTO_CENTER_RESET_MS) {
+    gAutoCenter_done = false;
   }
 }
 
@@ -344,12 +382,7 @@ void loop() {
     // 2) Posição do volante
     //    - Se tiver encoder real no Arduino: substitua gEncPos_f pela leitura do encoder
     //    - Por ora usa integração da velocidade (deriva ao longo do tempo)
-    // AUTO-CENTRO: 1x por boot, após alinhamento FOC (5s)
-    if (!gAutoCenterDone && gHaveEnc && millis() > AUTO_CENTER_MS) {
-      gPosOffset = gLastSpeedL;
-      gEncPos_f  = 0.0f;
-      gAutoCenterDone = true;
-    }
+    // Auto-center é tratado em stmEncPoll() por detecção de posição estável.
 
     // Botão Center do Wheel Control: salva posição atual como offset.
     // Na próxima leitura stmEncPoll subtrai gPosOffset → gEncPos_f=0.
