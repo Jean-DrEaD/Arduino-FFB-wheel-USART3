@@ -59,7 +59,10 @@
 // =================================================================
 // STM32 Link — Feedback (RX)
 // =================================================================
-static bool     gHaveEnc     = false;
+static bool     gHaveEnc      = false;
+static bool     gAutoCenterDone = false;
+static int16_t  gLastSpeedL     = 0;
+#define AUTO_CENTER_MS 5000
 static int16_t  gSpeedR      = 0;   // velocidade motor (rpm*10 aprox)
 static int16_t  gCmd1        = 0;
 static int16_t  gCmd2        = 0;
@@ -111,17 +114,9 @@ static void stmEncPoll() {
       gCmd2       = f.cmd2;
       gBatVoltage = f.batVoltage;
       gBoardTemp  = f.boardTemp;
-      gLastEncRxMs = millis();
-
-      // Auto-center: na primeira vez que o link é estabelecido (placa ligou e alinhou),
-      // zera o offset para que a posição do motor pós-alinhamento seja o centro (0°).
-      // Sem isso, o volante aparece em ~-176° no WC porque o encoder para num valor
-      // arbitrário após o alinhamento.
-      if (!gHaveEnc) {
-        gPosOffset = (float)f.speedL_meas;
-        gEncPos_f  = 0.0f;
-      }
+      gLastSpeedL  = f.speedL_meas;
       gHaveEnc    = true;
+      gLastEncRxMs = millis();
 
       // Posicao real do encoder (MT6701 via STM32, campo speedL_meas)
       // O firmware envia get_x_TotalCount() clamped para int16 (-32768..32767).
@@ -270,6 +265,7 @@ void setup() {
   // A proteção real é o keepalive no loop: mesmo sem Wheel Control, o Arduino
   // continua enviando stmSendCmd(0,0) a cada 2ms → STM32 nunca faz timeout.
   CONFIG_SERIAL.begin(115200);
+  CONFIG_SERIAL.setTimeout(10);
 
   // Serial1: link STM32 (RX1/TX1 do Pro Micro / Leonardo)
   Serial1.begin(500000);
@@ -348,11 +344,18 @@ void loop() {
     // 2) Posição do volante
     //    - Se tiver encoder real no Arduino: substitua gEncPos_f pela leitura do encoder
     //    - Por ora usa integração da velocidade (deriva ao longo do tempo)
+    // AUTO-CENTRO: 1x por boot, após alinhamento FOC (5s)
+    if (!gAutoCenterDone && gHaveEnc && millis() > AUTO_CENTER_MS) {
+      gPosOffset = gLastSpeedL;
+      gEncPos_f  = 0.0f;
+      gAutoCenterDone = true;
+    }
+
     // Botão Center do Wheel Control: salva posição atual como offset.
     // Na próxima leitura stmEncPoll subtrai gPosOffset → gEncPos_f=0.
     if (gResetPosition) {
       gResetPosition = false;
-      gPosOffset = (float)((int16_t)(gEncPos_f + gPosOffset)); // salva speedL_meas atual como novo centro
+      gPosOffset += (float)gEncPos_f; // novo_offset = speedL_meas = gPosOffset + gEncPos_f
       gEncPos_f   = 0.0f;
       gTorqueOut  = 0;
       stmSendCmd(0, 0);
@@ -381,16 +384,13 @@ void loop() {
     // Envia torque ao STM32 SEMPRE (mesmo com Wheel Control fechado).
     // Isso mantém o keepalive serial ativo e impede timeout no STM32.
     // Sem FFB ativo (jogo fechado/sem efeitos), gTorqueOut=0 → motor livre.
-    stmSendCmd(0, -gTorqueOut); // neg: INVERT_R_DIRECTION no STM32 re-inverte
+    stmSendCmd(0, -gTorqueOut); // neg: INVERT_R_DIRECTION no STM32 espelha mechAngle → força correta
 
     // 6) HID report
     //    Mapeia posição do encoder para range HID (-32767..32767)
-    //    Sem negação: turn.x positivo = volante direita = HID direita.
-    //    (A dupla negação anterior — stmSendCmd(-torque) + hidPos=-turn.x — se cancelava
-    //     no torque mas deixava o eixo HID invertido em relação ao movimento físico.)
     int32_t hidPos = 0;
     if (ROTATION_MAX > 0) {
-      hidPos = (int32_t)((float)turn.x / (float)ROTATION_MAX * (float)MID_REPORT_X);
+      hidPos =  (int32_t)((float)turn.x / (float)ROTATION_MAX * (float)MID_REPORT_X);
     }
     hidPos = constrain(hidPos, -MID_REPORT_X - 1, MID_REPORT_X);
 
