@@ -66,12 +66,16 @@ static bool     gHaveEnc      = false;
 // (motor parado com enable=0 → posição estável → auto-center disparava cedo demais).
 // Em vez disso: monitora variação de posição; só centra após 4200ms SEM mudança >8 ticks
 // E ignora pos=0 (é o reset interno do contador durante o alinhamento).
-#define AUTO_CENTER_SETTLE_MS   4200  // ms de posição estável → alinhamento terminou
-#define AUTO_CENTER_DEADBAND    8     // ticks de variação tolerada (ruído do encoder)
+#define AUTO_CENTER_SETTLE_MS   4200  // ms de posição estável → dispara auto-center
+// IMPORTANTE: deve ser > duração total do alinhamento (fase 2 tem 2s parado).
+// Valor < 2000ms dispara durante fase 2 → gAutoCenter_done antes de terminar.
+#define AUTO_CENTER_DEADBAND    3     // ticks de variação tolerada
 #define AUTO_CENTER_RESET_MS    3000  // link precisa ficar down >3s para permitir novo auto-center
 static int16_t  gAutoCenter_lastPos  = 0;
 static uint32_t gAutoCenter_stableMs = 0;
 static bool     gAutoCenter_done     = false;
+static int32_t  gAutoCenter_sum      = 0;  // acumulador para média
+static int32_t  gAutoCenter_cnt      = 0;  // contagem de amostras estáveis
 static uint32_t gLinkDownMs          = 0;
 static int16_t  gSpeedR      = 0;   // velocidade motor (rpm*10 aprox)
 static int16_t  gCmd1        = 0;
@@ -131,21 +135,30 @@ static void stmEncPoll() {
         gAutoCenter_lastPos  = f.speedL_meas;
         gAutoCenter_stableMs = millis();
         gAutoCenter_done     = false;
+        gAutoCenter_sum      = 0;
+        gAutoCenter_cnt      = 0;
       }
       gHaveEnc = true;
 
       // Auto-center: aguarda posição estável por AUTO_CENTER_SETTLE_MS.
-      // Garante que o alinhamento terminou antes de centrar.
-      // Ignora pos=0 (reset interno do contador durante alinhamento).
+      // Usa média das amostras estáveis para eliminar offset residual do encoder.
+      // BUG FIX (Bug 6): removido check por == 0 que reiniciava o timer quando o
+      // volante passava pelo centro real. Com o salto de TotalCount corrigido no
+      // STM32 (Bug 1), essa proteção não é mais necessária e só atrasava o auto-center.
       if (!gAutoCenter_done) {
-        if (f.speedL_meas == 0 ||
-            abs((int32_t)f.speedL_meas - (int32_t)gAutoCenter_lastPos) > AUTO_CENTER_DEADBAND) {
+        if (abs((int32_t)f.speedL_meas - (int32_t)gAutoCenter_lastPos) > AUTO_CENTER_DEADBAND) {
           gAutoCenter_lastPos  = f.speedL_meas;
           gAutoCenter_stableMs = millis();
-        } else if ((millis() - gAutoCenter_stableMs) >= AUTO_CENTER_SETTLE_MS) {
-          gPosOffset       = (float)f.speedL_meas;
-          gEncPos_f        = 0.0f;
-          gAutoCenter_done = true;
+          gAutoCenter_sum      = 0;
+          gAutoCenter_cnt      = 0;
+        } else {
+          gAutoCenter_sum += (int32_t)f.speedL_meas;
+          gAutoCenter_cnt++;
+          if ((millis() - gAutoCenter_stableMs) >= AUTO_CENTER_SETTLE_MS && gAutoCenter_cnt > 0) {
+            gPosOffset       = (float)(gAutoCenter_sum / gAutoCenter_cnt);
+            gEncPos_f        = 0.0f;
+            gAutoCenter_done = true;
+          }
         }
       }
 
@@ -204,15 +217,16 @@ static void stmSendCmd(int16_t steer, int16_t speed) {
 // =================================================================
 static const int16_t TORQUE_DEADBAND = 5;    // ignora ruído < 5 unidades
 // TORQUE_MAX: pico de torque enviado ao STM32 (escala -1000..+1000).
-//   600 era conservador demais — impactos saíam em ~30% da força real.
-//   950 deixa headroom de 5% contra clipping e permite picos de meio-fio completos.
-//   Para motores mais fortes ou usuários experientes: 1000 (máximo).
-static const int16_t TORQUE_MAX      = 950;
+//   950 causava sag severo de tensão (24V→11V) ao centralizar após alinhamento,
+//   disparando DC_LINK_WATCHDOG e matando o motor antes do auto-center completar.
+//   700 dá headroom de ~26% contra picos de corrente; força ainda é percepível.
+//   Para aumentar depois que a fonte/bateria for confirmada estável: 800-950.
+static const int16_t TORQUE_MAX      = 700;
 // TORQUE_SLEW: variação máxima por ciclo a 500Hz (2ms/ciclo).
-//   80 → 0→950 em ~19 ciclos = 38ms — matava completamente impactos de <30ms.
-//   250 → 0→950 em ~4 ciclos = 8ms — transientes de meio-fio chegam com força real.
-//   Se sentir oscilação/buzz em alta frequência, reduzir para 180.
-static const int16_t TORQUE_SLEW     = 250;
+//   250 → 0→700 em ~3 ciclos = 6ms — transientes rápidos mas menos pico de corrente.
+//   150 → 0→700 em ~5 ciclos = 10ms — ramp mais suave na centralização inicial.
+//   Se sentir que impactos ficaram fracos, aumentar para 200.
+static const int16_t TORQUE_SLEW     = 150;
 
 static int16_t gTorqueOut = 0;
 
@@ -417,7 +431,16 @@ void loop() {
     // Envia torque ao STM32 SEMPRE (mesmo com Wheel Control fechado).
     // Isso mantém o keepalive serial ativo e impede timeout no STM32.
     // Sem FFB ativo (jogo fechado/sem efeitos), gTorqueOut=0 → motor livre.
-    stmSendCmd(0, -gTorqueOut); // neg: INVERT_R_DIRECTION no STM32 espelha mechAngle → força correta
+    //
+    // NOTA de sinal (GD32 / BOARD_GD32 sem INVERT_R_DIRECTION):
+    //   Feedback: speedL_meas = -enc_pos  (negação no STM32, main.c)
+    //   Efeito físico: inpTgt positivo → enc_pos DIMINUI → speedL_meas AUMENTA → pos AUMENTA
+    //   Loop correto: pos negativa → spring: gTorqueOut positivo → speed = +gTorqueOut →
+    //     inpTgt positivo → enc_pos diminui → pos fica menos negativa → convergência ✓
+    //
+    //   ANTES (código antigo): stmSendCmd(0, -gTorqueOut) — funcionava apenas com INVERT_R_DIRECTION
+    //   ativo (STM32). Para GD32 sem INVERT_R_DIRECTION criava loop POSITIVO (runaway).
+    stmSendCmd(0, gTorqueOut);
 
     // 6) HID report
     //    Mapeia posição do encoder para range HID (-32767..32767)
@@ -457,4 +480,5 @@ void loop() {
     }
   }
 }
-/* Arduino Leonardo/Pro Micro Force Feedback Wheel firmware
+//* Arduino Leonardo/Pro Micro Force Feedback Wheel firmware
+
