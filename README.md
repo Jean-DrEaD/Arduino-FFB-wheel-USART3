@@ -1,123 +1,78 @@
-# Arduino-FFB-wheel-USART3
+﻿# Arduino-FFB-wheel â€” USART3 Fork
 
-Fork do [ranenbg/Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) adaptado para comunicação Serial com STM32/GD32 via USART3 em vez de encoder físico no Arduino e saída PWM.
+Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com suporte a comunicaÃ§Ã£o serial USART3 para motores GD32/STM32 (hoverboard-firmware-hack-FOC).
 
-Usado em conjunto com [Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3) para montar um Direct Drive FFB Wheel.
-
----
-
-## Hardware
-
-| Componente | Detalhe |
-|---|---|
-| Arduino | Pro Micro / Leonardo (ATmega32U4) |
-| Placa STM32/GD32 | Hoverboard STM32F103RC ou GD32F103RCT6 |
-| Encoder | MT6701 no STM32 (ABZ, CPR = 4096) — não conectado ao Arduino |
-| Comunicação | Serial1 (pinos 0/1) @ 500 000 baud via divisor 1kΩ/2kΩ |
-
-> **Serial1 (pinos RX1/TX1)** é o link físico com o STM32. **Serial (USB CDC)** é a porta do Wheel Control GUI — os dois são independentes e não interferem.
+**Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
 
 ---
 
-## Conexões
+## Branches
 
-| Sinal | Arduino Pro Micro | STM32 (placa) |
-|---|---|---|
-| RX1 — feedback STM32 | Pin 0 (RX1) | Right Sideboard PB10 / TX |
-| TX1 — comando torque | Pin 1 (TX1) via **R1 1kΩ + R2 2kΩ** | Right Sideboard PB11 / RX |
-| GND | GND | Right Sideboard GND |
-
----
-
-## Compilação
-
-Abrir `brWheel_HID/brWheel_HID.ino` na Arduino IDE.
-
-- Placa: **Arduino Leonardo** ou **SparkFun Pro Micro 5V/16MHz**
-- Não requer bibliotecas externas além das inclusas no fork
+| Branch | Plataforma | Pasta do sketch |
+|--------|-----------|----------------|
+| `main` | Pro Micro (ATmega32U4) | `brWheel_HID/` |
+| `esp32-s3` | ESP32-S3 Zero / Mini | `brWheel_ESP32S3/` |
 
 ---
 
-## Fixes aplicados neste fork
+## Branch `main` â€” Pro Micro
 
-| # | Arquivo | Descrição |
-|---|---|---|
-| 1 | `brWheel_HID.ino` | `TOP = 1000` e `MM_MAX_MOTOR_TORQUE = 1000` em `setup()` — sem isso `EffectDivider() = INF` e todos os efeitos FFB retornam 0 |
-| 2 | `brWheel_HID.ino` | `gEncPos_f = +f.speedL_meas - gPosOffset` (sem negação) — direita=positivo, alinhado com encoder MT6701 |
-| 3 | `brWheel_HID.ino` | `hidPos` sem negação — eixo HID correto no Wheel Control GUI e no jogo |
-| 4 | `brWheel_HID.ino` | `stmSendCmd(0, -gTorqueOut)` — compensa `INVERT_R_DIRECTION` no STM32; GD32 usa mesmo sinal (hardware já compensado) |
-| 5 | `brWheel_HID.ino` | Auto-centro no primeiro frame válido após 5 s de boot — aguarda alinhamento FOC do STM32 antes de capturar `gPosOffset` |
-| 6 | `brWheel_HID.ino` | `gPosOffset += gEncPos_f` no botão Center — referência acumulada correta; funciona com cliques consecutivos |
-| 7 | `brWheel_HID.ino` | `CONFIG_SERIAL.setTimeout(10)` — reduz bloqueio do `parseInt()` de 1000 ms para 10 ms, evitando HID desaparecer ao fechar o Wheel Control |
-| 8 | `brWheel_HID.ino` | `stmSendCmdKeepalive()` no `loop()` e dentro do `calibrate()` — STM32 nunca entra em timeout serial durante operação normal ou calibração |
-| 9 | `ffb_pro.ino` | `command.x +=` em `USB_EFFECT_CONSTANT` e `USB_EFFECT_RAMP` (era `-=`) — kerbs e batidas chegam no sentido correto para motor DD Serial |
-| 10 | `SerialInterface.ino` | Comando `'C'` retorna `1` ao Wheel Control (habilita botão Center no GUI) e seta flag `gResetPosition` |
-| 11 | `StmFrames.h` | Definição do frame STM32 (8 bytes, Little Endian) em arquivo separado |
+### Hardware
 
----
+| FunÃ§Ã£o | Pino |
+|--------|------|
+| UART TX â†’ GD32 RX | TX1 (Serial1) |
+| UART RX â† GD32 TX | RX1 (Serial1) |
+| Acelerador | A0 |
+| Freio | A1 |
+| Embreagem | A2 (opcional) |
+| Gear UP | D9 (INPUT_PULLUP, NA) |
+| Gear DN | D10 (INPUT_PULLUP, NA) |
 
-## Parâmetros principais (`brWheel_HID.ino`)
+### ConfiguraÃ§Ã£o (`brWheel_HID/Config.h`)
 
-```cpp
-#define ROTATION_DEG  1080    // ±540° lock-to-lock
-#define CPR           4096    // MT6701 1024 PPR × 4
-#define TOP           1000    // range de saída Serial → STM32
-#define TORQUE_MAX     950    // pico de torque (escala 0–1000)
-#define TORQUE_SLEW    250    // rampa máx por ciclo a 500 Hz (~4 ms de 0→950)
+```c
+#define USE_PROMICRO
+#define USE_EEPROM
+#define USE_SEQ_SHIFTER
+#define SHIFTER_UP_PIN  9
+#define SHIFTER_DN_PIN  10
+```
+
+### Arduino IDE
+
+```
+Board: SparkFun Pro Micro (5V / 16MHz)
 ```
 
 ---
 
-## Wheel Control GUI
+## Protocolo serial GD32 â†” Pro Micro / ESP32-S3
 
-Usar [ranenbg/Arduino-FFB-gui](https://github.com/ranenbg/Arduino-FFB-gui) v2.6.5 ou superior.
+Baud: **500 000 bps**, 8N1.
 
-Copiar o arquivo `DD_base` (sem extensão) para a pasta `data/` do Wheel Control.
+```
+PC â†’ GD32  (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
+GD32 â†’ PC (16 bytes):   0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
+```
 
-| Parâmetro | Valor | Nota |
-|---|---|---|
-| Rotation | 1080° | ±540° |
-| CPR | 4096 | MT6701 |
-| General Gain | 255 | 100% |
-| Constant Gain | 255 | impactos e kerbs — canal principal DD |
-| Periodic Gain | 230 | texturas e vibração de motor |
-| Damper Gain | 40 | habilitado |
-| Inertia Gain | 80 | habilitado |
-| Spring Gain | 0 | desabilitado (motor DD) |
-| Friction Gain | 0 | desabilitado (motor DD) |
-| Center Spring | 0 | desabilitado |
-| Stop Force | 255 | batentes de rotação |
-| Desktop Effects | Damper + Inertia | `effstate = 6` |
+`speedL_meas = -enc_pos` (negado no GD32). Torque positivo â†’ motor traciona â†’ enc_pos diminui â†’ loop fecha.
 
 ---
 
-## Fluxo de sinal
+## Bugs corrigidos (vs upstream ranenbg)
 
-```
-PC (jogo)
-    │  USB HID FFB effects
-    ▼
-Arduino Pro Micro
-    │  ffb_pro.ino — CalcTorqueCommands()
-    │  command.x += magnitude  (constant/ramp)
-    │  → gTorqueOut (com slew TORQUE_SLEW)
-    │  stmSendCmd(0, -gTorqueOut)
-    │  Serial1 @ 500 kbps
-    ▼
-STM32 / GD32F103
-    │  FOC TRQ_MODE — cmdR = torque
-    │  Motor BLDC → MT6701 → enc_pos
-    │  SerialFeedback: speedL_meas = enc_pos
-    ▼
-Arduino Pro Micro
-    │  gEncPos_f = speedL_meas - gPosOffset
-    │  turn.x = gEncPos_f  →  HID axis X
-    ▼
-PC (jogo lê posição + calcula próximo FFB)
-```
+1. **Runaway pÃ³s-alinhamento** â€” sinal de torque invertido em `stmSendCmd()`
+2. **Jump de posiÃ§Ã£o fase 2â†’3** â€” `seed_count` usava contador open-loop em vez de TIM4 CNT real
+3. **Auto-center reset ao cruzar pos=0** â€” removida guarda espÃºria `speedL_meas == 0`
+4. **Queda de tensÃ£o antes do center** â€” `TORQUE_MAX` 950â†’700, `TORQUE_SLEW` 250â†’150
+5. **`finalize_y_alignment()`** â€” resets overcurrent/watchdog/serial timeout ausentes
+6. **`handle_y_high_power_phase()`** â€” zero-torque ausente antes de `ApplyDirection`
 
 ---
 
-## Licença
+## Efeitos FFB suportados
 
-GPL-3.0 — herdada do projeto original [ranenbg/Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel).
+Constant Â· Spring Â· Damper Â· Inertia Â· Friction Â· Sine Â· Square Â· Triangle Â· SawtoothUp/Down Â· Ramp Â· Envelope Â· Desktop autocenter/damper/inertia/friction
+
+Ganhos configurÃ¡veis via **WheelControl** (CDC serial, report `0xF1`).
