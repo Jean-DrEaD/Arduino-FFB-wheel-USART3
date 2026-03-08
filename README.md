@@ -15,26 +15,50 @@
 
 **Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
 
-### Hardware
-> ⚠️ ADC máx **3.3V**. Pedais com 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
+### Pinout — ESP32-S3 Zero (Waveshare)
+
+```
+                    USB-C
+          ┌─────────[====]─────────┐
+    GND ──┤ L1                R1  ├── 5V
+   3.3V ──┤ L2                R2  ├── IO43  ← Debug TX  (Serial0)
+    IO2 ──┤ L3                R3  ├── IO44  ← Debug RX  (Serial0)
+    IO1 ──┤ L4  ← Acelerador  R4  ├── IO5   ← Botão 0
+    IO0 ──┤ L5    (BOOT)      R5  ├── IO6   ← Botão 1
+   IO45 ──┤ L6                R6  ├── IO7   ← Botão 2
+   IO46 ──┤ L7                R7  ├── IO8   ← Botão 3
+    IO9 ──┤ L8                R8  ├── IO18  ← UART RX ← GD32 TX (PB10)
+   IO10 ──┤ L9                R9  ├── IO17  ← UART TX → GD32 RX (PB11)
+   IO11 ──┤ L10 ← HX711 DOUT  R10 ├── IO16
+   IO12 ──┤ L11 ← HX711 SCK   R11 ├── IO15
+   IO13 ──┤ L12               R12 ├── IO38  ← Gear UP
+   IO14 ──┤ L13               R13 ├── IO39  ← Gear DN
+          └───────────────────────┘
+                 (IO40 = pad SMD extra → Freio de mão digital)
+
+  Pinos internos (sem header): IO19 = USB D−  |  IO20 = USB D+
+```
+
+> ⚠️ **ADC máx 3.3 V.** Pedais alimentados por 5 V precisam de divisor resistivo 2:1 (ex: 2×10 kΩ).
+
+### Tabela de sinais
 
 | Função | GPIO | Obs |
 |--------|------|-----|
-| USB D- / D+ | 19 / 20 | Fixo, conectar ao PC |
-| UART TX → STM32/GD32 RX | 17 | PB11 do STM32/GD32 (USART3 RX), 500kbps |
+| USB D− / D+ | 19 / 20 | Fixo, conectar ao PC |
+| UART TX → STM32/GD32 RX | 17 | PB11 do STM32/GD32 (USART3 RX), 500 kbps |
 | UART RX ← STM32/GD32 TX | 18 | PB10 do STM32/GD32 (USART3 TX) |
-| Acelerador | 1 | ADC1_CH0, máx **3.3V** |
-| Freio | 2 | ADC1_CH1, ou HX711 com USE_LOAD_CELL |
-| Embreagem | 3 | Opcional |
+| Acelerador | 1 | ADC1_CH0, máx ⚠️**3.3 V** |
+| Freio analógico | 2 | ADC1_CH1, ou HX711 com USE_LOAD_CELL |
+| Embreagem | 3 | ADC1_CH2, opcional |
+| Freio de mão analógico | 4 | ADC1_CH3, opcional (`HBRAKE_AXIS_PIN`) |
 | HX711 DOUT | 11 | Somente com USE_LOAD_CELL |
 | HX711 SCK | 12 | Somente com USE_LOAD_CELL |
+| Botões 0–3 | 5–8 | INPUT_PULLUP |
 | Gear UP | 38 | INPUT_PULLUP, switch NA → GND |
 | Gear DN | 39 | INPUT_PULLUP, switch NA → GND |
-| Freio mão digital | 40 | Opcional, descomentar em Config |
-| Botões 0–3 | 5–8 | INPUT_PULLUP |
-| Debug TX/RX | 43 / 44 | UART0 via USB chip da placa |
-
-> ⚠️ ADC máx **3.3V**. Pedais com 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
+| Freio de mão digital | 40 | Pad SMD, opcional (descomentar em Config) |
+| Debug TX / RX | 43 / 44 | UART0 via chip USB da placa |
 
 ### Arduino IDE — obrigatório
 
@@ -80,7 +104,7 @@ Baud: **500 000 bps**, 8N1.
 
 ```
 ESP32 → STM32/GD32   (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
-STM32/GD32 → ESP32  (16 bytes):   0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
+STM32/GD32 → ESP32  (18 bytes):   0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
 ```
 
 ---
