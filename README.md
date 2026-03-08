@@ -1,6 +1,6 @@
 # Arduino-FFB-wheel — USART3 Fork
 
-Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com suporte a comunicação serial USART3 para motores GD32/STM32 (hoverboard-firmware-hack-FOC).
+Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com suporte a comunicação serial USART3 para motores STM32/GD32 (hoverboard-firmware-hack-FOC).
 
 **Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
 
@@ -16,6 +16,23 @@ Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com su
 ---
 
 ## Branch `main` — Pro Micro
+
+## Pinout / Ligação
+
+![Pinout](pinout.png)
+
+| Sinal | STM32 (placa) | Arduino Pro Micro |
+|---|---|---|
+| USART3 TX (feedback) | Right Sideboard — PB10 / TX | RX1 (pin 0) |
+| USART3 RX (comando) | Right Sideboard — PB11 / RX | TX1 (pin 1) via **R1 1kΩ + R2 2kΩ** |
+| GND | Right Sideboard — GND | GND |
+| Encoder A | Left Hall — PB6 | — |
+| Encoder B | Left Hall — PB7 | — |
+| Encoder VCC | Left Hall — 5 V | — |
+| SWD Flash | PA14 (SWCLK) / PA13 (SWDIO) | ST-Link |
+
+> **Divisor de tensão TX Arduino → RX STM32:** o Pro Micro opera a 5 V e o STM32/GD32 aceita 3,3 V. Use R1 = 1 kΩ em série com o TX e R2 = 2 kΩ entre o fio e GND.
+
 
 ### Hardware
 
@@ -39,15 +56,16 @@ Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com su
 #define SHIFTER_DN_PIN  10
 ```
 
+
 ### Arduino IDE
 
 ```
-Board: SparkFun Pro Micro (5V / 16MHz)
+Board: | Arduino | Pro Micro / Leonardo (ATmega32U4) | SparkFun Pro Micro (5V / 16MHz)
 ```
 
 ---
 
-## Protocolo serial GD32 ↔ Pro Micro / ESP32-S3
+## Protocolo serial STM32/GD32 ↔ Pro Micro / ESP32-S3
 
 Baud: **500 000 bps**, 8N1.
 
