@@ -1,8 +1,4 @@
-﻿# Arduino-FFB-wheel — USART3 Fork
-
-Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com suporte a comunicação serial USART3 para motores GD32/STM32 (hoverboard-firmware-hack-FOC).
-
-**Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
+﻿# PORT para ESP32-S3 do meu Arduino-FFB-wheel — USART3 Fork
 
 ---
 
@@ -17,7 +13,10 @@ Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) com su
 
 ## Branch `esp32-s3` — ESP32-S3 Zero / Mini
 
+**Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
+
 ### Hardware
+> ⚠️ ADC máx **3.3V**. Pedais alimentados em 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
 
 | Função | GPIO | Obs |
 |--------|------|-----|
@@ -57,7 +56,7 @@ Primeira gravação: **BOOT** segurado → **EN** pressionado → soltar BOOT �
 | `brWheel_ESP32S3.ino` | Loop principal: posição, torque, pedais, botões, HID |
 | `Config_ESP32S3.h` | Pinos, parâmetros, globais compartilhados |
 | `HID_Wheel_ESP32.h` | TinyUSB HID descriptor idêntico ao Pro Micro |
-| `StmFrames.h` | Protocolo serial GD32 (idêntico ao Pro Micro) |
+| `StmFrames.h` | Protocolo serial STM32/GD32 (idêntico ao Pro Micro) |
 | `ffb.h` | Tipos FFB (guarda `#ifdef ESP32`) |
 | `ffb.ino` | Parsing USB output reports (guards AVR/ESP32) |
 | `ffb_pro.h` | Declarações do motor FFB |
@@ -82,8 +81,8 @@ Primeira gravação: **BOOT** segurado → **EN** pressionado → soltar BOOT �
 Baud: **500 000 bps**, 8N1.
 
 ```
-PC → GD32  (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
-GD32 → PC  (16 bytes):  0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
+PC → STM32/GD32  (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
+GD32/STM32 → PC  (16 bytes):  0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
 ```
 
 `speedL_meas = -enc_pos` — posição em ticks do encoder (GD32 nega antes de enviar).
@@ -98,6 +97,6 @@ Ganhos e rotação configuráveis via **WheelControl** (CDC serial, report `0xF1
 
 ---
 
-## Branch `main` — Pro Micro
+## Branch `main` — Arduino Pro Micro
 
 Ver [README na branch main](https://github.com/Jean-DrEaD/Arduino-FFB-wheel-USART3/blob/main/README.md).
