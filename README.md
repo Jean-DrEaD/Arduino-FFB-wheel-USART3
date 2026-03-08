@@ -3,6 +3,7 @@
 Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) adaptado para comunicação serial USART3 com motores STM32/GD32 (hoverboard-firmware-hack-FOC). Substitui a saída PWM/DAC do original por protocolo serial bidirecional, delegando o controle FOC de corrente ao STM32/GD32 e usando o encoder do próprio STM32/GD32 como feedback de posição.
 
 **Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
+— variante PlatformIO: `ONE_AXIS_USART_VARIANT` (STM32) ou `GD32F103RC_stlink` / `GD32F103RC_uart` (GD32)
 
 ---
 
@@ -31,7 +32,7 @@ Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) adapta
 | Encoder VCC | Left Hall — 5 V | — |
 | SWD Flash | PA14 (SWCLK) / PA13 (SWDIO) | ST-Link |
 
-> ⚠️ **Divisor de tensão TX Arduino → RX STM32:** o Pro Micro opera a 5 V e o STM32/GD32 aceita 3,3 V. Use R1 = 1 kΩ em série com o TX e R2 = 2 kΩ entre o fio e GND.
+> ⚠️ **Divisor de tensão TX Arduino → RX STM32/GD32:** o Pro Micro opera a 5 V e o STM32/GD32 aceita 3,3 V. Use R1 = 1 kΩ em série com o TX e R2 = 2 kΩ entre o fio e GND.
 
 ### Hardware
 
@@ -61,7 +62,7 @@ Fork do [Arduino-FFB-wheel](https://github.com/ranenbg/Arduino-FFB-wheel) adapta
 ### Arduino IDE
 
 ```
-Board: SparkFun Pro Micro (5V / 16MHz)
+Board: Arduino Leonardo | SparkFun Pro Micro | 5V / 16MHz
 ```
 
 ---
@@ -69,13 +70,6 @@ Board: SparkFun Pro Micro (5V / 16MHz)
 ## Protocolo serial GD32 ↔ Arduino
 
 Baud: **500 000 bps**, 8N1.
-
-```
-Arduino → GD32  (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
-GD32 → Arduino (16 bytes):   0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
-```
-
-`speedL_meas = -enc_pos` — negado no GD32. Arduino nega ao ler, recuperando `enc_pos` real.
 
 ---
 
