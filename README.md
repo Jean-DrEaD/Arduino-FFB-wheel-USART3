@@ -1,4 +1,4 @@
-﻿# PORT para ESP32-S3 do meu Arduino-FFB-wheel — USART3 Fork
+# PORT para ESP32-S3 do meu Arduino-FFB-wheel — USART3 Fork
 
 ---
 
@@ -7,7 +7,7 @@
 | Branch | Plataforma | Pasta do sketch |
 |--------|-----------|----------------|
 | `main` | Pro Micro (ATmega32U4) | `brWheel_HID/` |
-| **`esp32-s3`** ← você está aqui | **ESP32-S3 Zero / Mini** | **`brWheel_ESP32S3/`** |
+| **`esp32-s3`** — você está aqui | ESP32-S3 Zero / Mini | `brWheel_ESP32S3/` |
 
 ---
 
@@ -16,23 +16,25 @@
 **Firmware do motor:** [hoverboard-firmware-hack-FOC-USART3](https://github.com/Jean-DrEaD/hoverboard-firmware-hack-FOC-USART3)
 
 ### Hardware
-> ⚠️ ADC máx **3.3V**. Pedais alimentados em 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
+> ⚠️ ADC máx **3.3V**. Pedais com 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
 
 | Função | GPIO | Obs |
 |--------|------|-----|
-| USB D- / D+ | 19 / 20 | Fixo |
-| UART TX → GD32 RX | 17 | PB11 do GD32 (USART3 RX) |
-| UART RX ← GD32 TX | 18 | PB10 do GD32 (USART3 TX) |
-| Acelerador | 1 | ADC1\_CH0, máx 3.3V |
-| Freio | 2 | ADC1\_CH1 |
+| USB D- / D+ | 19 / 20 | Fixo, conectar ao PC |
+| UART TX → STM32/GD32 RX | 17 | PB11 do STM32/GD32 (USART3 RX), 500kbps |
+| UART RX ← STM32/GD32 TX | 18 | PB10 do STM32/GD32 (USART3 TX) |
+| Acelerador | 1 | ADC1_CH0, máx **3.3V** |
+| Freio | 2 | ADC1_CH1, ou HX711 com USE_LOAD_CELL |
 | Embreagem | 3 | Opcional |
-| Gear UP | 38 | INPUT\_PULLUP, switch → GND |
-| Gear DN | 39 | INPUT\_PULLUP, switch → GND |
-| Freio mão digital | 40 | Descomentar em Config |
-| Botões 0–3 | 5–8 | INPUT\_PULLUP |
-| Debug TX/RX | 43 / 44 | UART0 via USB chip |
+| HX711 DOUT | 11 | Somente com USE_LOAD_CELL |
+| HX711 SCK | 12 | Somente com USE_LOAD_CELL |
+| Gear UP | 38 | INPUT_PULLUP, switch NA → GND |
+| Gear DN | 39 | INPUT_PULLUP, switch NA → GND |
+| Freio mão digital | 40 | Opcional, descomentar em Config |
+| Botões 0–3 | 5–8 | INPUT_PULLUP |
+| Debug TX/RX | 43 / 44 | UART0 via USB chip da placa |
 
-> ⚠️ ADC máx **3.3V**. Pedais alimentados em 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
+> ⚠️ ADC máx **3.3V**. Pedais com 5V precisam de divisor resistivo 2:1 (ex: 2×10kΩ).
 
 ### Arduino IDE — obrigatório
 
@@ -49,54 +51,66 @@ Instalar arduino-esp32 ≥ 3.0:
 
 Primeira gravação: **BOOT** segurado → **EN** pressionado → soltar BOOT → Upload.
 
-### Arquivos do sketch (`brWheel_ESP32S3/`)
+### Configuração (`brWheel_ESP32S3/Config_ESP32S3.h`)
 
-| Arquivo | Descrição |
-|---------|-----------|
-| `brWheel_ESP32S3.ino` | Loop principal: posição, torque, pedais, botões, HID |
-| `Config_ESP32S3.h` | Pinos, parâmetros, globais compartilhados |
-| `HID_Wheel_ESP32.h` | TinyUSB HID descriptor idêntico ao Pro Micro |
-| `StmFrames.h` | Protocolo serial STM32/GD32 (idêntico ao Pro Micro) |
-| `ffb.h` | Tipos FFB (guarda `#ifdef ESP32`) |
-| `ffb.ino` | Parsing USB output reports (guards AVR/ESP32) |
-| `ffb_pro.h` | Declarações do motor FFB |
-| `ffb_pro.ino` | Efeitos completos: spring, damper, inertia, friction, periodic, ramp (guards AVR/ESP32) |
-| `debug.h` | No-ops no ESP32 |
+```c
+//#define USE_LOAD_CELL   // descomente para load cell HX711 no freio
+#define LC_DOUT_PIN  11
+#define LC_SCK_PIN   12
+#define LC_GAIN      128
+```
 
-### Diferenças vs Pro Micro
+Para usar load cell instale a biblioteca **"HX711_ADC"** por Olav Kallhovd no Gerenciador de Bibliotecas.
 
-| Item | Pro Micro | ESP32-S3 |
-|------|-----------|----------|
-| USB callback | `HID_ReceiveReport_Callback` (AVR ISR) | `_onSetReport()` (TinyUSB) |
-| ADC | 10 bits, `<<2` para 12 bits HID | 12 bits nativos |
-| Calibração mecânica | `BRFFB::calibrate()` com encoder local | Stub — alinhamento feito pelo GD32 |
-| `FfbSetDriver(0)` | Registra callbacks USB | Chama `FfbInit()` (sem callbacks) |
-| PROGMEM / `<util/delay.h>` | Necessário | Guards `#ifndef ESP32` |
-| CPU / RAM | 16 MHz / 2.5 KB | 240 MHz / 512 KB |
+### Calibração load cell
+
+`LC_scaling` (1–255) ajusta a sensibilidade via comando serial `B<n>` (WheelControl ou monitor serial).
+
+```
+calFactor = 0.25 × LC_scaling   →   padrão 128 → calFactor = 32.0
+```
+
+Aumentar `LC_scaling` = pedal mais sensível (menos força necessária para atingir 100%).
 
 ---
 
-## Protocolo serial GD32 ↔ ESP32-S3
+## Protocolo serial STM32/GD32 ↔ ESP32-S3
 
 Baud: **500 000 bps**, 8N1.
 
 ```
-PC → STM32/GD32  (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
-GD32/STM32 → PC  (16 bytes):  0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
+ESP32 → STM32/GD32   (8 bytes):   0xABCD | steer=0 | speed=torque[-1000..1000] | checksum(XOR)
+STM32/GD32 → ESP32  (16 bytes):   0xABCD | cmd1 | cmd2 | speedR | speedL=-enc_pos | batV | temp | led | checksum
 ```
 
-`speedL_meas = -enc_pos` — posição em ticks do encoder (GD32 nega antes de enviar).
+---
+
+## Paridade de features com branch main
+
+| Feature | Pro Micro | ESP32-S3 |
+|---------|-----------|----------|
+| FFB engine completo (ffb_pro.ino) | ✅ | ✅ |
+| HID compatível WheelControl | ✅ | ✅ |
+| configCDC serial (U/V/S/R/C/G/E/B/Y/F/A) | ✅ | ✅ |
+| applyDeadband + slewLimit torque | ✅ | ✅ |
+| Auto-center por posição estável (4200ms) | ✅ | ✅ |
+| Link timeout (200ms) + reset auto-center | ✅ | ✅ |
+| Pedais analógicos (accel + brake) | ✅ | ✅ |
+| Load cell HX711 no freio | ✅ USE_LOAD_CELL | ✅ USE_LOAD_CELL |
+| Câmbio sequencial | ✅ D9/D10 | ✅ GPIO38/39 |
+| Botões extras | ✅ D4–D7 | ✅ GPIO5–8 |
+| USE_FIXED_TORQUE_TEST (debug) | ✅ | ✅ |
+| Persistência de parâmetros | EEPROM (512B AVR) | Preferences (flash NVS) |
+| ADC resolução | 10-bit → shift ×4 → 12-bit HID | 12-bit nativo |
 
 ---
 
 ## Efeitos FFB suportados
 
-Constant · Spring · Damper · Inertia · Friction · Sine · Square · Triangle · SawtoothUp/Down · Ramp · Envelope · Desktop autocenter/damper/inertia/friction
+Constant · Spring · Damper · Inertia · Friction · Sine · Square · Triangle · SawtoothUp · SawtoothDown · Ramp · Envelope · Desktop autocenter / damper / inertia / friction
 
 Ganhos e rotação configuráveis via **WheelControl** (CDC serial, report `0xF1`).
 
 ---
 
-## Branch `main` — Arduino Pro Micro
-
-Ver [README na branch main](https://github.com/Jean-DrEaD/Arduino-FFB-wheel-USART3/blob/main/README.md).
+*Branch main (Pro Micro):* https://github.com/Jean-DrEaD/Arduino-FFB-wheel-USART3/tree/main

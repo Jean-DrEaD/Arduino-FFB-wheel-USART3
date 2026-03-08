@@ -44,6 +44,11 @@
   #include <HX711_ADC.h>
 #endif
 
+// ========================= CONFIG RÁPIDA =========================
+#define USE_FIXED_TORQUE_TEST   0     // 0 = FFB real do jogo (1 = torque fixo para teste)
+#define FIXED_TORQUE_VALUE      400   // -1000..1000 (comece com 400, suba depois)
+// =================================================================
+
 // ============================================================================
 //  INSTÂNCIAS GLOBAIS
 // ============================================================================
@@ -92,7 +97,12 @@ static int16_t TORQUE_SLEW = TORQUE_SLEW_DEFAULT;
 // ============================================================================
 static volatile float gEncPos_f  = 0.0f;
 static float          gPosOffset = 0.0f;
-static bool           gHaveEnc   = false;
+static bool           gHaveEnc       = false;
+static uint32_t       gLastEncRxMs   = 0;   // último frame válido recebido
+static uint32_t       gLinkDownMs    = 0;   // quando o link caiu
+
+#define ENC_LINK_TIMEOUT_MS   200   // ms sem frame → link morto
+#define AUTO_CENTER_RESET_MS  3000  // link deve ficar down >3s para permitir novo auto-center
 
 static bool     gAutoCenter_done     = false;
 static uint32_t gAutoCenter_stableMs = 0;
@@ -198,7 +208,17 @@ static void stmEncPoll() {
                     ^ (uint16_t)f->cmdLed;
         if (cs == f->checksum) {
           memcpy(&gLastFrame, f, sizeof(StmEncFrame));
-          gHaveEnc   = true;
+          gLastEncRxMs = millis();
+
+          if (!gHaveEnc) {
+            // Link (re)estabelecido: reinicia detecção de posição estável
+            gAutoCenter_lastPos  = f->speedL_meas;
+            gAutoCenter_stableMs = millis();
+            gAutoCenter_done     = false;
+            gAutoCenter_sum      = 0;
+            gAutoCenter_count    = 0;
+          }
+          gHaveEnc = true;
 
           float newPos = (float)(-(int32_t)f->speedL_meas) - gPosOffset;
           gEncPos_f   = constrain(newPos, -(float)ROTATION_MAX, (float)ROTATION_MAX);
@@ -236,6 +256,20 @@ static void stmEncPoll() {
         gRxIdx = sizeof(StmEncFrame) - 1;
       }
     }
+  }
+
+  // Link timeout: se não receber frame por ENC_LINK_TIMEOUT_MS, declara link morto.
+  // Zera posição para evitar que spring/stop mantenha torque com posição congelada.
+  if (gHaveEnc && (millis() - gLastEncRxMs) > ENC_LINK_TIMEOUT_MS) {
+    gHaveEnc    = false;
+    gEncPos_f   = 0.0f;
+    gLinkDownMs = millis();
+  }
+  // Permite novo auto-center somente se o link ficou down > AUTO_CENTER_RESET_MS
+  // (distingue desligamento real de press do botão power do hoverboard)
+  if (!gHaveEnc && gAutoCenter_done &&
+      (millis() - gLinkDownMs) > AUTO_CENTER_RESET_MS) {
+    gAutoCenter_done = false;
   }
 }
 
@@ -589,7 +623,11 @@ void loop() {
   s32v axis;
   axis.x    = (s32)gEncPos_f;
   t0        = millis();           // avança timer interno do ffb_pro.ino
+#if USE_FIXED_TORQUE_TEST
+  s32v ffbs; ffbs.x = FIXED_TORQUE_VALUE; ffbs.y = 0;
+#else
   s32v ffbs = gFFB.CalcTorqueCommands(&axis);
+#endif
 
   // 4) Pipeline de torque:
   //    clip → deadband → slew → envio GD32
